@@ -1,4 +1,4 @@
-package com.weather.flink;
+package com.weather.flink.weather;
 
 import junit.framework.Test;
 import junit.framework.TestCase;
