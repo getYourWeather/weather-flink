@@ -26,7 +26,18 @@ public class WeatherPresenceSerializationSchema implements KafkaRecordSerializat
     public WeatherPresenceSerializationSchema(String topic) {
         this.topic = topic;
     }
-
+    @Override
+    public ProducerRecord<byte[], byte[]> serialize(WeatherData element, KafkaSinkContext kafkaSinkContext, Long aLong) {
+        try {
+            byte[] jsonByteArray = mapper.writeValueAsString(element).getBytes();
+            long payloadTS = (Long) element.get("timestamp");
+            String key = element.getDeviceId().toString();
+            return new ProducerRecord<>(topic, null, payloadTS, key.getBytes(), jsonByteArray);
+        } catch (JsonProcessingException e) {
+            logger.error("Exception, Not able to serializing avro record {}", element, e);
+        }
+        return null;
+    }
     static {
         SimpleModule simpleModule = new SimpleModule("SimpleModule");
         simpleModule.addSerializer(CharSequence.class, new JsonSerializer<CharSequence>() {
@@ -35,35 +46,16 @@ public class WeatherPresenceSerializationSchema implements KafkaRecordSerializat
                 jsonGenerator.writeString(charSequence.toString());
             }
         });
-        mapper.registerModule(simpleModule);
-
         mapper
-                // .addMixIn(CharSequence.class, CharSeqSerializer.class)
-                .addMixIn(GenericRecord.class, AvroObjectPrepend.class)
-                .setSerializationInclusion(JsonInclude.Include.NON_NULL);
-    }
-
-
-    @Override
-    public ProducerRecord<byte[], byte[]> serialize(WeatherData element, KafkaSinkContext kafkaSinkContext, Long aLong) {
-        try {
-            String json = mapper.writeValueAsString(element);
-            byte[] jsonByteArray = json.getBytes();
-            long payloadTS = (Long) element.get("timestamp");
-            String key = element.getDeviceId().toString();
-            return new ProducerRecord<>(topic, null, payloadTS, key == null ? null : key.getBytes(), jsonByteArray);
-        } catch (JsonProcessingException e) {
-            logger.error("Exception while serializing avro record {}", element, e);
-        }
-        return null;
+                .registerModule(simpleModule)
+                .setSerializationInclusion(JsonInclude.Include.NON_NULL)
+                .addMixIn(GenericRecord.class, AvroObjectPrepend.class);
     }
     private static class AvroObjectPrepend {
-
         @JsonIgnore
         public Schema getSchema() {
             return null;
         }
-
         @JsonIgnore
         public SpecificData getSpecificData() {
             return null;

@@ -31,7 +31,7 @@ public class WeatherProcessingJob
         String serverConfig = jobParameters.getConfiguration().get(ConfigOptions.key("kafka.servers").stringType().defaultValue("localhost:9092"));
         consumerProps = new Properties();
         consumerProps.setProperty(KAFKA_BOOTSTRAP_SERVERS, serverConfig);
-        consumerProps.put("enable.auto.commit", true);
+        consumerProps.put("enable.auto.commit", false);
         consumerProps.put("client.dns.lookup", "use_all_dns_ips");
         consumerProps.put("reconnect.backoff.ms", 1000);
         consumerProps.put("reconnect.backoff.max.ms", 5000);
@@ -42,9 +42,7 @@ public class WeatherProcessingJob
     public static void main(String[] args) throws Exception {
         jobParameters = ParameterTool.fromArgs(args);
         jobParameters = jobParameters.mergeWith(ParameterTool.fromSystemProperties());
-
         logger.info("Weather Job Settings:\n{}", jobParameters.getConfiguration());
-
         WeatherProcessingJob job = new WeatherProcessingJob();
         job.setupExecutionEnvironment();
         job.setupExecutionPlan();
@@ -65,24 +63,17 @@ public class WeatherProcessingJob
     }
 
     private DataStream<WeatherData> getDataStream() {
-        String weatherTopic = getTopic();
-        final Float outOfOrderInMillisFloat = 3.5f * 1000;
-        final long outOfOrderInMillis = outOfOrderInMillisFloat.longValue();
+        final float outOfOrderInMillisFloat = 3.5f * 1000;
         KafkaSource<WeatherData> kafkaDataSource = KafkaSource
                 .<WeatherData>builder()
                 .setBootstrapServers(consumerProps.getProperty(KAFKA_BOOTSTRAP_SERVERS))
                 .setProperties(consumerProps)
-                .setTopics(weatherTopic)
+                .setTopics("weatherData")
                 .setDeserializer(new WeatherKafkaAvroDeserializerSchema())
                 .setGroupId(GROUP_ID)
                 .build();
         return environment.fromSource(kafkaDataSource,
                 WatermarkStrategy.noWatermarks(), "weather Event data source").uid("weather Event data source");
-    }
-
-    public String getTopic() {
-        StringBuilder topic = new StringBuilder("weatherData");
-        return topic.toString();
     }
 
     private void setupExecutionPlan() {
@@ -95,7 +86,10 @@ public class WeatherProcessingJob
         weatherProcessingJobPlan.executionPlan(inStream);
         weatherProcessingJobPlan.setKafkaSink(getDronePresenceProducer("WeatherPresenceEvent"));
     }
-
+    private void execute() throws Exception {
+        logger.info("Job execution plan: {}", environment.getExecutionPlan());
+        environment.execute("weatherProcessingJob");
+    }
     protected KafkaSink<WeatherData> getDronePresenceProducer(String topic) {
         return KafkaSink.<WeatherData>builder()
                 .setBootstrapServers(producerProps.getProperty(KAFKA_BOOTSTRAP_SERVERS))
@@ -103,9 +97,5 @@ public class WeatherProcessingJob
                 .setTransactionalIdPrefix(topic)
                 .setRecordSerializer(new WeatherPresenceSerializationSchema(topic))
                 .build();
-    }
-    private void execute() throws Exception {
-        logger.info("Execution plan:\n {} \n", environment.getExecutionPlan());
-        environment.execute("weatherProcessingJob");
     }
 }
