@@ -1,5 +1,6 @@
 package com.weather.flink.weather;
 
+import com.weather.flink.weather.kafka.WeatherKafkaAvroDeserializerSchema;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.java.utils.ParameterTool;
@@ -27,7 +28,7 @@ public class WeatherProcessingJob
     public static final String KAFKA_BOOTSTRAP_SERVERS = "bootstrap.servers";
 
     public WeatherProcessingJob() {
-        String serverConfig = jobParameters.getConfiguration().get(ConfigOptions.key("kafka.servers").stringType().defaultValue("kafka:9092"));
+        String serverConfig = jobParameters.getConfiguration().get(ConfigOptions.key("kafka.servers").stringType().defaultValue("localhost:9092"));
         tenantId = jobParameters.getConfiguration().get(ConfigOptions.key("tenantId").stringType().defaultValue(""));
         consumerProps = new Properties();
         consumerProps.setProperty(KAFKA_BOOTSTRAP_SERVERS, serverConfig);
@@ -43,9 +44,7 @@ public class WeatherProcessingJob
         jobParameters = ParameterTool.fromArgs(args);
         jobParameters = jobParameters.mergeWith(ParameterTool.fromSystemProperties());
 
-        if (logger.isInfoEnabled()) {
-            logger.info("Weather Job Settings:\n{}", jobParameters.getConfiguration());
-        }
+        logger.info("Weather Job Settings:\n{}", jobParameters.getConfiguration());
 
         WeatherProcessingJob job = new WeatherProcessingJob();
         job.setupExecutionEnvironment();
@@ -62,7 +61,7 @@ public class WeatherProcessingJob
         config.set(RestartStrategyOptions.RESTART_STRATEGY_EXPONENTIAL_DELAY_JITTER_FACTOR, 0.5);
         environment = StreamExecutionEnvironment.getExecutionEnvironment(config);
         environment.getConfig().setGlobalJobParameters(jobParameters);
-        environment.setParallelism(2);
+        environment.setParallelism(1);
         environment.getConfig().setAutoWatermarkInterval(200L);
     }
 
@@ -75,23 +74,24 @@ public class WeatherProcessingJob
                 .setBootstrapServers(consumerProps.getProperty(KAFKA_BOOTSTRAP_SERVERS))
                 .setProperties(consumerProps)
                 .setTopics(weatherTopic)
-                .setDeserializer(null).setGroupId(GROUP_ID)
+                .setDeserializer(new WeatherKafkaAvroDeserializerSchema())
+                .setGroupId(GROUP_ID)
                 .build();
         return environment.fromSource(kafkaDataSource,
-                WatermarkStrategy.<WeatherData>forBoundedOutOfOrderness(Duration.ofMillis(outOfOrderInMillis)).withIdleness(Duration.ofMillis(500)), "weather Event data source").uid("weather Event data source");
+                WatermarkStrategy.noWatermarks(), "weather Event data source").uid("weather Event data source");
     }
 
     public String getTopic() {
         StringBuilder topic = new StringBuilder("weatherData");
-        if (StringUtils.isNotBlank(tenantId)) {
-            topic.append("-").append(tenantId);
-        }
         return topic.toString();
     }
 
     private void setupExecutionPlan() {
         DataStream<WeatherData> inStream = getDataStream();
-        // create the job plan
+        inStream.map(e -> {
+            logger.error("DATA IS : {} ", e.getDeviceId());
+            return e;
+        });
     }
 
     private void execute() throws Exception {
