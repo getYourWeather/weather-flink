@@ -1,10 +1,11 @@
 package com.weather.flink.weather;
 
 import com.weather.flink.weather.kafka.WeatherKafkaAvroDeserializerSchema;
-import org.apache.commons.lang3.StringUtils;
+import com.weather.flink.weather.kafka.WeatherPresenceSerializationSchema;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.configuration.*;
+import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.slf4j.Logger;
@@ -23,13 +24,11 @@ public class WeatherProcessingJob
     private static final String GROUP_ID = "weather-processing-job";
     protected final Properties consumerProps;
     protected final Properties producerProps;
-    private final String tenantId;
     protected StreamExecutionEnvironment environment;
     public static final String KAFKA_BOOTSTRAP_SERVERS = "bootstrap.servers";
 
     public WeatherProcessingJob() {
         String serverConfig = jobParameters.getConfiguration().get(ConfigOptions.key("kafka.servers").stringType().defaultValue("localhost:9092"));
-        tenantId = jobParameters.getConfiguration().get(ConfigOptions.key("tenantId").stringType().defaultValue(""));
         consumerProps = new Properties();
         consumerProps.setProperty(KAFKA_BOOTSTRAP_SERVERS, serverConfig);
         consumerProps.put("enable.auto.commit", true);
@@ -92,8 +91,19 @@ public class WeatherProcessingJob
             logger.error("DATA IS : {} ", e.getDeviceId());
             return e;
         });
+        WeatherProcessingJobPlan weatherProcessingJobPlan = new WeatherProcessingJobPlan();
+        weatherProcessingJobPlan.executionPlan(inStream);
+        weatherProcessingJobPlan.setKafkaSink(getDronePresenceProducer("WeatherPresenceEvent"));
     }
 
+    protected KafkaSink<WeatherData> getDronePresenceProducer(String topic) {
+        return KafkaSink.<WeatherData>builder()
+                .setBootstrapServers(producerProps.getProperty(KAFKA_BOOTSTRAP_SERVERS))
+                .setKafkaProducerConfig(producerProps)
+                .setTransactionalIdPrefix(topic)
+                .setRecordSerializer(new WeatherPresenceSerializationSchema(topic))
+                .build();
+    }
     private void execute() throws Exception {
         logger.info("Execution plan:\n {} \n", environment.getExecutionPlan());
         environment.execute("weatherProcessingJob");
